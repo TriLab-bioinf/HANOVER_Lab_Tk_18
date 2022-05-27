@@ -1,0 +1,60 @@
+---
+title: "Methylation plots"
+output: html_notebook
+author: Hernan Lorenzi
+---
+
+```{r load libraries}
+library(tidyr)
+library(ggpubr)
+library(cowplot)
+```
+
+```{r load data}
+data <- readxl::read_excel(path = "./data/210920_Diffmeth_genes_allruns_q30.xlsx", sheet = "diffMethTable_region_cmp1_genes", range = "A1:AA46261", col_names = TRUE, na = "NA", trim_ws = TRUE, col_types = c(rep("text",2),rep("numeric",2),rep("text",2),rep("numeric",21)))
+
+# removing rows with Symbols = NA
+data.no.na <- data[!is.na(data$symbol) , ]
+
+# Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
+data.no.na$category <- "unchanged"
+data.no.na$category[data.no.na$mean.mean.oga_ko >= (data.no.na$mean.mean.wild_type + (data.no.na$mean.mean.wild_type * 0.25)) & data.no.na$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.no.na$category[data.no.na$mean.mean.oga_ko <= (data.no.na$mean.mean.wild_type - (data.no.na$mean.mean.wild_type * 0.25)) & data.no.na$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.no.na$category <- as.factor(data.no.na$category)
+
+```
+
+```{r plot data}
+dir.create(path = "./Plots", showWarnings = FALSE)
+
+# Sort data so unchanged are on top and are not plotted on top of hyper and hypo categories
+data.no.na <- data.no.na[order(data.no.na$category, decreasing = TRUE), ]
+
+p <- ggplot(data = data.no.na, 
+            aes( x = mean.mean.wild_type, 
+                 y = mean.mean.oga_ko, 
+                 color = category)) +
+            geom_point(size = 0.5, alpha = 0.7) + # size of plot symbols
+            theme_linedraw() + 
+            scale_color_manual(breaks = c("hyper", "hypo", "unchanged"),
+                               values=c("blue3", "chartreuse3", "gray"), 
+                               name="",
+                               guide = guide_legend(override.aes = list(size = 2)) # size of legend symbols
+                               ) + 
+            theme(panel.grid = element_blank(), 
+                  legend.position=c(.15, .90),
+                  legend.margin = margin(unit(x = c(0,0,0,0), units = 'cm')),
+                  legend.box.just = "left",
+                  legend.key.size = unit(0.5, "cm"),
+                  legend.title = element_blank(),
+                  legend.text = element_text(size = 12),
+                  plot.margin = unit(x = c(2,2,2,2), units = 'cm')
+                  ) +
+            coord_equal(expand=FALSE) +
+            ylab("Methylation in OGA KO") +
+            xlab("Methylation in WT") 
+
+p <- p + geom_abline(slope = 1, intercept = 0, col = "black", size=0.5, linetype="dashed")
+ggsave2(filename = "oga_ko_vs_wt_dotplot.pdf", plot = p, path = "./Plots")
+p
+```
