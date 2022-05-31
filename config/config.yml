@@ -1,0 +1,20 @@
+# Metadata
+reference:  
+    abundant_rna_file: data/00ref/
+    ensembl_ver: 106
+    ensembl_gtf: data/00ref/Saccharomyces_cerevisiae.R64-1-1.106.gtf 
+    genome_build: R64-1-1.106
+    genome_file: data/00ref/Saccharomyces_cerevisiae.R64-1-1.106.fa
+    star_index: 00ref
+    genome_source: ensembl
+star_db:
+    sjdbOverhang: 74
+samples:
+    VM-1:
+    VM-2:
+    VM-3:
+    VM-4:
+    VM-5:
+    VM-6:
+    VM-7:
+    VM-8:
