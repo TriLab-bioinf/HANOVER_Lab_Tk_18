@@ -1,60 +1,587 @@
 ---
 title: "Methylation plots"
-output: html_notebook
-author: Hernan Lorenzi
+author: "Hernan Lorenzi"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+params:
+  printcode: false
 ---
+```{r, setup, include=FALSE, warning=FALSE, message=FALSE}
+# set this option in the first code chunk in the document
+knitr::opts_chunk$set(echo = params$printcode)
 
-```{r load libraries}
-library(tidyr)
-library(ggpubr)
-library(cowplot)
 ```
 
-```{r load data}
-data <- readxl::read_excel(path = "./data/210920_Diffmeth_genes_allruns_q30.xlsx", sheet = "diffMethTable_region_cmp1_genes", range = "A1:AA46261", col_names = TRUE, na = "NA", trim_ws = TRUE, col_types = c(rep("text",2),rep("numeric",2),rep("text",2),rep("numeric",21)))
+```{r load libraries}
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(broom)
+```
+
+# Load OGA's data
+```{r load OGAs data}
+data <- readxl::read_excel(path = "./data/210920_Diffmeth_genes_allruns_q30.xlsx",
+                           sheet = "diffMethTable_region_cmp1_genes", 
+                           range = "A1:AA46261", 
+                           col_names = TRUE,
+                           na = "NA", 
+                           trim_ws = TRUE, 
+                           col_types = c(rep("text",2),
+                                        rep("numeric",2),
+                                        rep("text",2),
+                                        rep("numeric",21)
+                                        )
+                           )
+
+promoter.data <- readxl::read_excel(path = "./data/210920_Diffmeth_Promoters_allruns_q30..xlsx",
+                           sheet = "diffMethTable_region_cmp1_promo", 
+                           range = "A1:AA50301", 
+                           col_names = TRUE,
+                           na = "NA", 
+                           trim_ws = TRUE, 
+                           col_types = c(rep("text",2),
+                                        rep("numeric",2),
+                                        rep("text",2),
+                                        rep("numeric",21)
+                                        )
+                           )
+
+cpg.data <- readxl::read_excel(path = "./data/210920_Diffmeth_CpG_Islands_allruns_q30.xlsx",
+                           sheet = "diffMethTable_region_cmp1_cpgis", 
+                           range = "A1:Y15452", 
+                           col_names = TRUE,
+                           na = "NA", 
+                           trim_ws = TRUE, 
+                           col_types = c(rep("text",2),
+                                        rep("text",2),
+                                        rep("numeric",21)
+                                        )
+                           )
+
+imprinted.genes <- readxl::read_excel(path = "./data/List_imprinted_genes.xlsx",
+                           sheet = "Sheet1", 
+                           range = "A1:E179", 
+                           col_names = TRUE,
+                           na = "NA",
+                           trim_ws = TRUE,
+                           col_types = c(rep("text",5))
+                           )
+
+# filtered out non-imprinted genes
+imprinted.genes.true <- filter(.data = imprinted.genes, status == "Imprinted")
 
 # removing rows with Symbols = NA
 data.no.na <- data[!is.na(data$symbol) , ]
+promoter.data.no.na <- promoter.data[!is.na(promoter.data$symbol) , ]
 
+add_flags <- function(my_data){
 # Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
-data.no.na$category <- "unchanged"
-data.no.na$category[data.no.na$mean.mean.oga_ko >= (data.no.na$mean.mean.wild_type + (data.no.na$mean.mean.wild_type * 0.25)) & data.no.na$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
-data.no.na$category[data.no.na$mean.mean.oga_ko <= (data.no.na$mean.mean.wild_type - (data.no.na$mean.mean.wild_type * 0.25)) & data.no.na$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
-data.no.na$category <- as.factor(data.no.na$category)
+  my_data$category <- "unchanged"
+  my_data$weight <- 10
+  my_data$category[my_data$mean.mean.oga_ko >= (my_data$mean.mean.wild_type + (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- "hyper" # Hypermethylated
+  my_data$weight[my_data$mean.mean.oga_ko >= (my_data$mean.mean.wild_type + (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- 5
+  my_data$category[my_data$mean.mean.oga_ko <= (my_data$mean.mean.wild_type - (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- "hypo" # Hypomethylated
+  my_data$weight[my_data$mean.mean.oga_ko <= (my_data$mean.mean.wild_type - (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- 5
+  
+  my_data$weight[my_data$category == "hyper" & my_data$id %in% imprinted.genes.true$id] <- 2
+  my_data$category[my_data$category == "hyper" & my_data$id %in% imprinted.genes.true$id] <- "imprinted"
+  
+  my_data$weight[my_data$category == "hypo" & my_data$id %in% imprinted.genes.true$id] <- 2
+  my_data$category[my_data$category == "hypo" & my_data$id %in% imprinted.genes.true$id] <- "imprinted"
+  
+  my_data$category <- as.factor(my_data$category)
+  
+  return(my_data)
+}
+
+data.no.na <- add_flags(my_data = data.no.na)
+promoter.data.no.na <- add_flags(my_data = promoter.data.no.na)
+cpg.data <- add_flags(my_data = cpg.data)
+
+data.log2 <- data[,c("id","mean.mean.quot.log2")]
+
+# Select only those CpG islands that have the lowest (best) ranking score
+data.top_100 <-head(arrange(data, combinedRank.var), n=100)
+data.top_100.log2 <- data.top_100[,c("id","mean.mean.quot.log2")]
 
 ```
 
-```{r plot data}
+# Plot OGA's data
+```{r plot OGAs data}
 dir.create(path = "./Plots", showWarnings = FALSE)
 
-# Sort data so unchanged are on top and are not plotted on top of hyper and hypo categories
-data.no.na <- data.no.na[order(data.no.na$category, decreasing = TRUE), ]
+plot_oga_wt_correlation <- function(my_data, type = ""){
+  # Sort data so unchanged are on top and are not plotted on top of hyper and hypo categories
+  my_data <- my_data[order(my_data$weight, decreasing = TRUE), ]
+  
+  p <- ggplot(data = my_data, 
+              aes( x = mean.mean.wild_type, 
+                   y = mean.mean.oga_ko, 
+                   color = category)) +
+              geom_point(alpha = 0.7, size = ifelse(my_data$category == "unchanged", 0.5,1)) + # size of plot symbols
+              theme_linedraw() + 
+              scale_color_manual(breaks = c("hyper", "hypo", "unchanged", "imprinted"),
+                                 values=c("blue", "chartreuse3", "lightgray","red"), 
+                                 name="",
+                                 guide = guide_legend(override.aes = list(size = 2)) # size of legend symbols
+                                 ) + 
+              theme(panel.grid = element_blank(), 
+                    legend.position=c(.1, .91),
+                    legend.margin = margin(unit(x = c(0,0,0,0), units = 'cm')),
+                    legend.box.just = "left",
+                    legend.key.size = unit(0.5, "cm"),
+                    legend.title = element_blank(),
+                    legend.text = element_text(size = 12),
+                    plot.margin = unit(x = c(2,2,2,2), units = 'cm')
+                    ) +
+              coord_equal(expand=FALSE) +
+              ylab("Percent methylation in OGA KO") +
+              xlab("Percent methylation in WT") +
+              xlim(0,1) + ylim(0,1) +
+              labs(title = paste0("Mean methylation percentage (", type, ")")) +
+              geom_abline(slope = 1, intercept = 0, col = "black", size=0.5, linetype="dashed")
+  return(p)
+}
 
-p <- ggplot(data = data.no.na, 
-            aes( x = mean.mean.wild_type, 
-                 y = mean.mean.oga_ko, 
-                 color = category)) +
-            geom_point(size = 0.5, alpha = 0.7) + # size of plot symbols
-            theme_linedraw() + 
-            scale_color_manual(breaks = c("hyper", "hypo", "unchanged"),
-                               values=c("blue3", "chartreuse3", "gray"), 
-                               name="",
-                               guide = guide_legend(override.aes = list(size = 2)) # size of legend symbols
-                               ) + 
-            theme(panel.grid = element_blank(), 
-                  legend.position=c(.15, .90),
-                  legend.margin = margin(unit(x = c(0,0,0,0), units = 'cm')),
-                  legend.box.just = "left",
-                  legend.key.size = unit(0.5, "cm"),
-                  legend.title = element_blank(),
-                  legend.text = element_text(size = 12),
-                  plot.margin = unit(x = c(2,2,2,2), units = 'cm')
-                  ) +
-            coord_equal(expand=FALSE) +
-            ylab("Methylation in OGA KO") +
-            xlab("Methylation in WT") 
+p.genes <- plot_oga_wt_correlation(my_data = data.no.na, type = "genes")
+ggsave2(filename = "oga_ko_vs_wt_dotplot_genes.pdf", plot = p.genes, path = "./Plots", width = 8, height = 11)
 
-p <- p + geom_abline(slope = 1, intercept = 0, col = "black", size=0.5, linetype="dashed")
-ggsave2(filename = "oga_ko_vs_wt_dotplot.pdf", plot = p, path = "./Plots")
-p
+p.promoters <- plot_oga_wt_correlation(my_data = promoter.data.no.na, type = "promoters")
+ggsave2(filename = "oga_ko_vs_wt_dotplot_promoters.pdf", plot = p.promoters, path = "./Plots", width = 8, height = 11)
+
+p.cpg <- plot_oga_wt_correlation(my_data = cpg.data, type = "CpG islands")
+ggsave2(filename = "oga_ko_vs_wt_dotplot_cpg.pdf", plot = p.cpg, path = "./Plots", width = 8, height = 11)
+
+p.genes
+p.promoters
+p.cpg
+```
+
+
+# Load zKO and mzOK datasets
+```{r load zKO data}
+data.zko.genes <- tibble(read.csv(file = "NAR_data/rnbeads_report_zKO3/differential_methylation_data/diffMethTable_region_cmp1_genes.csv", header = T) )
+data.mzko.genes <- tibble(read.csv(file = "NAR_data/rnbeads_report_mzKO3/differential_methylation_data/diffMethTable_region_cmp1_genes.csv", header = T) )
+
+# removing rows with Symbols = NA
+#data.no.na <- data[!is.na(data$symbol) , ]
+
+# Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
+data.zko.genes$category <- "unchanged"
+data.zko.genes$category[data.zko.genes$mean.mean.oga_ko >= (data.zko.genes$mean.mean.wild_type + (data.zko.genes$mean.mean.wild_type * 0.25)) & data.zko.genes$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.zko.genes$category[data.zko.genes$mean.mean.oga_ko <= (data.zko.genes$mean.mean.wild_type - (data.zko.genes$mean.mean.wild_type * 0.25)) & data.zko.genes$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.zko.genes$category <- as.factor(data.zko.genes$category)
+
+data.zko.genes.log2 <- data.zko.genes[,c("id","mean.mean.quot.log2")]
+
+data.mzko.genes$category <- "unchanged"
+data.mzko.genes$category[data.mzko.genes$mean.mean.oga_ko >= (data.mzko.genes$mean.mean.wild_type + (data.mzko.genes$mean.mean.wild_type * 0.25)) & data.mzko.genes$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.mzko.genes$category[data.mzko.genes$mean.mean.oga_ko <= (data.mzko.genes$mean.mean.wild_type - (data.mzko.genes$mean.mean.wild_type * 0.25)) & data.mzko.genes$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.mzko.genes$category <- as.factor(data.mzko.genes$category)
+
+data.mzko.genes.log2 <- data.mzko.genes[,c("id","mean.mean.quot.log2")]
+
+```
+
+# Merge data and data_zko log2FC
+```{r}
+all_gene_ids.zko <- full_join(x = data.log2, y = data.zko.genes.log2, "id")
+colnames(all_gene_ids.zko) <- c("ids","log2.OGA", "log2.zko")
+
+# remove genes with NAs
+all_gene_ids.zko.no.na <- drop_na(all_gene_ids.zko)
+
+all_gene_ids.mzko <- full_join(x = data.log2, y = data.mzko.genes.log2, "id")
+colnames(all_gene_ids.mzko) <- c("ids","log2.OGA", "log2.mzko")
+
+# remove genes with NAs
+all_gene_ids.mzko.no.na <- drop_na(all_gene_ids.mzko)
+
+# For top 100
+all_gene_ids.top_100.zko <- full_join(x = data.top_100.log2, y = data.zko.genes.log2, "id")
+colnames(all_gene_ids.top_100.zko) <- c("ids","log2.OGA", "log2.zko")
+
+# remove genes with NAs
+all_gene_ids.top_100.zko.no.na <- drop_na(all_gene_ids.top_100.zko)
+
+all_gene_ids.top_100.mzko <- full_join(x = data.top_100.log2, y = data.mzko.genes.log2, "id")
+colnames(all_gene_ids.top_100.mzko) <- c("ids","log2.OGA", "log2.mzko")
+
+# remove genes with NAs
+all_gene_ids.top_100.mzko.no.na <- drop_na(all_gene_ids.top_100.mzko)
+
+```
+
+# Plot Log2 OGA's vs zKO and mzKO datasets
+## All genes
+```{r plots}
+
+make_plot <-function(x, y, XLAB=NA, YLAB=NA){
+  my_table <- tibble(x,y)
+  
+  p <- ggplot(data = my_table, 
+              aes( x = x, 
+                   y = y)) +
+              geom_point(size = 0.5, alpha = 0.7, color = "blue") + # size of plot symbols
+              theme_linedraw()
+  if(!is.na(XLAB)){
+    p <- p + xlab(XLAB) 
+  }
+  
+  if(!is.na(YLAB)){
+    p <- p + ylab(YLAB) 
+  }
+              
+  p <- p + geom_abline(slope = 1, intercept = 0, col = "black", size=0.5, linetype="dashed")
+  return(p)
+}
+
+p.zko <- make_plot(x = all_gene_ids.zko.no.na$log2.OGA, y = all_gene_ids.zko.no.na$log2.zko, XLAB = "OGA's gene quot.log2", YLAB = "zKO gene quot.log2")
+p.zko
+ggsave2(filename = "./Plots/genes_zKO_vs_OGA.pdf", plot = p.zko)
+
+p.mzko <- make_plot(all_gene_ids.mzko.no.na$log2.OGA, all_gene_ids.mzko.no.na$log2.mzko, XLAB = "OGA's gene quot.log2", YLAB = "mzKO gene quot.log2")
+p.mzko
+ggsave2(filename = "./Plots/genes_mzKO_vs_OGA.pdf", plot = p.mzko)
+```
+
+## Top 100 ranked genes
+```{r}
+p.top_100.zko <- make_plot(x = all_gene_ids.top_100.zko.no.na$log2.OGA, y = all_gene_ids.top_100.zko.no.na$log2.zko, XLAB = "OGA's gene quot.log2", YLAB = "zKO gene quot.log2")
+p.top_100.zko
+ggsave2(filename = "./Plots/genes_zKO_vs_OGA.top_100.pdf", plot = p.top_100.zko)
+
+p.top_100.mzko <- make_plot(all_gene_ids.top_100.mzko.no.na$log2.OGA, all_gene_ids.top_100.mzko.no.na$log2.mzko, XLAB = "OGA's gene quot.log2", YLAB = "mzKO gene quot.log2")
+p.top_100.mzko
+ggsave2(filename = "./Plots/genes_mzKO_vs_OGA.top_100.pdf", plot = p.top_100.mzko)
+```
+
+
+
+# Correlation analysis
+## All genes
+```{r correlation}
+dir.create(path = "./Docs", showWarnings = FALSE)
+
+fit.zko <- lm(all_gene_ids.zko.no.na$log2.OGA ~ all_gene_ids.zko.no.na$log2.zko)
+summary(fit.zko)
+stats.zko.df <- glance(fit.zko)
+write.table(x = stats.zko.df, file = "./Docs/lm_genes_zKO_vs_OGA.txt", sep = "\t")
+
+fit.mzko <- lm(all_gene_ids.mzko.no.na$log2.OGA ~ all_gene_ids.mzko.no.na$log2.mzko)
+summary(fit.mzko)
+stats.mzko.df <- glance(fit.mzko)
+write.table(x = stats.mzko.df, file = "./Docs/lm_genes_mzKO_vs_OGA.txt", sep = "\t")
+```
+
+## Top 100 ranked genes
+```{r}
+
+# For Top 100
+fit.zko.top_100 <- lm(all_gene_ids.top_100.zko.no.na$log2.OGA ~ all_gene_ids.top_100.zko.no.na$log2.zko)
+summary(fit.zko.top_100)
+stats.zko.top_100.df <- glance(fit.zko.top_100)
+write.table(x = stats.zko.top_100.df, file = "./Docs/lm_genes_zKO_vs_OGA.top_100.txt", sep = "\t")
+
+fit.mzko.top_100 <- lm(all_gene_ids.top_100.mzko.no.na$log2.OGA ~ all_gene_ids.top_100.mzko.no.na$log2.mzko)
+summary(fit.mzko.top_100)
+stats.mzko.top_100.df <- glance(fit.mzko.top_100)
+write.table(x = stats.mzko.top_100.df, file = "./Docs/lm_genes_mzKO_vs_OGA.top_100.txt", sep = "\t")
+
+```
+
+############################################
+# CpG islands
+############################################
+
+# Load zKO and mzOK datasets
+```{r load CpG island data}
+data.zko.cpg_islands <- tibble(read.csv(file = "NAR_data/rnbeads_report_zKO3/differential_methylation_data/diffMethTable_region_cmp1_cpgislands.csv", header = T),  )
+data.mzko.cpg_islands <- tibble(read.csv(file = "NAR_data/rnbeads_report_mzKO3/differential_methylation_data/diffMethTable_region_cmp1_cpgislands.csv", header = T) )
+
+data.zko.cpg_islands <- mutate(.data = data.zko.cpg_islands, .before = "id", new_id = paste0(Chromosome,"_",Start,"_",End))
+data.mzko.cpg_islands <- mutate(.data = data.mzko.cpg_islands, .before = "id", new_id = paste0(Chromosome,"_",Start,"_",End))
+
+# removing rows with Symbols = NA
+#data.no.na <- data[!is.na(data$symbol) , ]
+
+# Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
+data.zko.cpg_islands$category <- "unchanged"
+data.zko.cpg_islands$category[data.zko.cpg_islands$mean.mean.oga_ko >= (data.zko.cpg_islands$mean.mean.wild_type + (data.zko.cpg_islands$mean.mean.wild_type * 0.25)) & data.zko.cpg_islands$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.zko.cpg_islands$category[data.zko.cpg_islands$mean.mean.oga_ko <= (data.zko.cpg_islands$mean.mean.wild_type - (data.zko.cpg_islands$mean.mean.wild_type * 0.25)) & data.zko.cpg_islands$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.zko.cpg_islands$category <- as.factor(data.zko.cpg_islands$category)
+
+data.zko.cpg_islands.log2 <- data.zko.cpg_islands[,c("new_id","mean.mean.quot.log2")]
+
+data.mzko.cpg_islands$category <- "unchanged"
+data.mzko.cpg_islands$category[data.mzko.cpg_islands$mean.mean.oga_ko >= (data.mzko.cpg_islands$mean.mean.wild_type + (data.mzko.cpg_islands$mean.mean.wild_type * 0.25)) & data.mzko.cpg_islands$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.mzko.cpg_islands$category[data.mzko.cpg_islands$mean.mean.oga_ko <= (data.mzko.cpg_islands$mean.mean.wild_type - (data.mzko.cpg_islands$mean.mean.wild_type * 0.25)) & data.mzko.cpg_islands$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.mzko.cpg_islands$category <- as.factor(data.mzko.cpg_islands$category)
+
+data.mzko.cpg_islands.log2 <- data.mzko.cpg_islands[,c("new_id","mean.mean.quot.log2")]
+
+# For OGA's dataset
+
+data.cpg_islands <- readxl::read_excel(path = "./data/210920_Diffmeth_CpG_Islands_allruns_q30.xlsx",
+                           sheet = "diffMethTable_region_cmp1_cpgis", 
+                           range = "A1:Y15452", 
+                           col_names = TRUE,
+                           na = "NA", 
+                           trim_ws = TRUE, 
+                           col_types = c(rep("text",2),
+                                        rep("numeric",23)
+                                        )
+                           )
+
+# Add new ID column
+data.cpg_islands <- mutate(.data = data.cpg_islands, .before = "id", new_id = paste0(Chromosome,"_",Start,"_",End))
+
+# removing rows with Symbols = NA
+data.cpg_islands.no.na <- drop_na(data = data.cpg_islands)
+
+# Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
+data.cpg_islands.no.na$category <- "unchanged"
+data.cpg_islands.no.na$category[data.cpg_islands.no.na$mean.mean.oga_ko >= (data.cpg_islands.no.na$mean.mean.wild_type + (data.cpg_islands.no.na$mean.mean.wild_type * 0.25)) & data.cpg_islands.no.na$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.cpg_islands.no.na$category[data.cpg_islands.no.na$mean.mean.oga_ko <= (data.cpg_islands.no.na$mean.mean.wild_type - (data.cpg_islands.no.na$mean.mean.wild_type * 0.25)) & data.cpg_islands.no.na$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.cpg_islands.no.na$category <- as.factor(data.cpg_islands.no.na$category)
+
+# Select only those CpG islands that have the lowest (best) ranking score
+data.cpg_islands.top_100 <-head(arrange(data.cpg_islands, combinedRank.var), n=100)
+
+data.cpg_islands.log2 <- data.cpg_islands[,c("new_id","mean.mean.quot.log2")]
+data.cpg_islands.top_100.log2 <- data.cpg_islands.top_100[,c("new_id","mean.mean.quot.log2")]
+```
+
+# Merge data and data_zko log2FC
+```{r}
+all_cpg_island_ids.zko <- full_join(x = data.cpg_islands.log2, y = data.zko.cpg_islands.log2, "new_id")
+colnames(all_cpg_island_ids.zko) <- c("new_id","log2.OGA", "log2.zko")
+
+# remove cpg_islands with NAs
+all_cpg_island_ids.zko.no.na <- drop_na(all_cpg_island_ids.zko)
+
+all_cpg_island_ids.mzko <- full_join(x = data.cpg_islands.log2, y = data.mzko.cpg_islands.log2, "new_id")
+colnames(all_cpg_island_ids.mzko) <- c("new_id","log2.OGA", "log2.mzko")
+
+# remove cpg_islands with NAs
+all_cpg_island_ids.mzko.no.na <- drop_na(all_cpg_island_ids.mzko)
+
+# For top 100
+all_cpg_island_ids.top_100.zko <- full_join(x = data.cpg_islands.top_100.log2, y = data.zko.cpg_islands.log2, "new_id")
+colnames(all_cpg_island_ids.top_100.zko) <- c("new_id","log2.OGA", "log2.zko")
+
+# remove cpg_islands with NAs
+all_cpg_island_ids.top_100.zko.no.na <- drop_na(all_cpg_island_ids.top_100.zko)
+
+all_cpg_island_ids.top_100.mzko <- full_join(x = data.cpg_islands.top_100.log2, y = data.mzko.cpg_islands.log2, "new_id")
+colnames(all_cpg_island_ids.top_100.mzko) <- c("new_id","log2.OGA", "log2.mzko")
+
+# remove cpg_islands with NAs
+all_cpg_island_ids.top_100.mzko.no.na <- drop_na(all_cpg_island_ids.top_100.mzko)
+
+```
+
+# Plot Log2 OGA's vs zKO and mzKO datasets
+## All CpG islands
+```{r CpG island plots}
+
+p.zko <- make_plot(x = all_cpg_island_ids.zko$log2.OGA, y = all_cpg_island_ids.zko$log2.zko, XLAB = "OGA's cpg_island quot.log2", YLAB = "zKO cpg_island quot.log2")
+p.zko
+ggsave2(filename = "./Plots/cpg_islands_zKO_vs_OGA.pdf", plot = p.zko)
+
+p.mzko <- make_plot(all_cpg_island_ids.mzko$log2.OGA, all_cpg_island_ids.mzko$log2.mzko, XLAB = "OGA's cpg_island quot.log2", YLAB = "mzKO cpg_island quot.log2")
+p.mzko
+ggsave2(filename = "./Plots/cpg_islands_mzKO_vs_OGA.pdf", plot = p.mzko)
+```
+
+## Top 100 CpG islands
+```{r}
+# For top 100
+p.zko.top_100 <- make_plot(x = all_cpg_island_ids.top_100.zko$log2.OGA, y = all_cpg_island_ids.top_100.zko$log2.zko, XLAB = "OGA's cpg_island quot.log2", YLAB = "zKO cpg_island quot.log2")
+p.zko.top_100
+ggsave2(filename = "./Plots/cpg_islands_zKO_vs_OGA.top_100.pdf", plot = p.zko)
+
+p.mzko.top_100 <- make_plot(all_cpg_island_ids.top_100.mzko$log2.OGA, all_cpg_island_ids.top_100.mzko$log2.mzko, XLAB = "OGA's cpg_island quot.log2", YLAB = "mzKO cpg_island quot.log2")
+p.mzko.top_100
+ggsave2(filename = "./Plots/cpg_islands_mzKO_vs_OGA.top_100.pdf", plot = p.mzko)
+```
+
+# Correlation analysis for CpG islands
+## All CpG islands
+```{r correlation CpG islands}
+dir.create(path = "./Docs", showWarnings = FALSE)
+
+fit.zko <- lm(all_cpg_island_ids.zko.no.na$log2.OGA ~ all_cpg_island_ids.zko.no.na$log2.zko)
+summary(fit.zko)
+stats.zko.df <- glance(fit.zko)
+write.table(x = stats.zko.df, file = "./Docs/lm_cpg_islands_zKO_vs_OGA.txt", sep = "\t")
+
+fit.mzko <- lm(all_cpg_island_ids.mzko.no.na$log2.OGA ~ all_cpg_island_ids.mzko.no.na$log2.mzko)
+summary(fit.mzko)
+stats.mzko.df <- glance(fit.mzko)
+write.table(x = stats.mzko.df, file = "./Docs/lm_cpg_islands_mzKO_vs_OGA.txt", sep = "\t")
+```
+
+## Top 100 CpG islands
+```{r}
+# For top 100
+fit.zko.top_100 <- lm(all_cpg_island_ids.top_100.zko.no.na$log2.OGA ~ all_cpg_island_ids.top_100.zko.no.na$log2.zko)
+summary(fit.zko.top_100)
+stats.zko.top_100.df <- glance(fit.zko.top_100)
+write.table(x = stats.zko.top_100.df, file = "./Docs/lm_cpg_islands_zKO_vs_OGA.top_100.txt", sep = "\t")
+
+fit.mzko.top_100 <- lm(all_cpg_island_ids.top_100.mzko.no.na$log2.OGA ~ all_cpg_island_ids.top_100.mzko.no.na$log2.mzko)
+summary(fit.mzko.top_100)
+stats.mzko.top_100.df <- glance(fit.mzko.top_100)
+write.table(x = stats.mzko.top_100.df, file = "./Docs/lm_cpg_islands_mzKO_vs_OGA.top_100.txt", sep = "\t")
+
+```
+
+##############################################
+# Promoters
+##############################################
+
+# Load zKO and mzOK datasets
+```{r}
+data.zko.promoters <- tibble(read.csv(file = "NAR_data/rnbeads_report_zKO3/differential_methylation_data/diffMethTable_region_cmp1_promoters.csv", header = T),  )
+data.mzko.promoters <- tibble(read.csv(file = "NAR_data/rnbeads_report_mzKO3/differential_methylation_data/diffMethTable_region_cmp1_promoters.csv", header = T) )
+
+
+# removing rows with Symbols = NA
+#data.no.na <- data[!is.na(data$symbol) , ]
+
+# Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
+data.zko.promoters$category <- "unchanged"
+data.zko.promoters$category[data.zko.promoters$mean.mean.oga_ko >= (data.zko.promoters$mean.mean.wild_type + (data.zko.promoters$mean.mean.wild_type * 0.25)) & data.zko.promoters$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.zko.promoters$category[data.zko.promoters$mean.mean.oga_ko <= (data.zko.promoters$mean.mean.wild_type - (data.zko.promoters$mean.mean.wild_type * 0.25)) & data.zko.promoters$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.zko.promoters$category <- as.factor(data.zko.promoters$category)
+
+data.zko.promoters.log2 <- data.zko.promoters[,c("id","mean.mean.quot.log2")]
+
+data.mzko.promoters$category <- "unchanged"
+data.mzko.promoters$category[data.mzko.promoters$mean.mean.oga_ko >= (data.mzko.promoters$mean.mean.wild_type + (data.mzko.promoters$mean.mean.wild_type * 0.25)) & data.mzko.promoters$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.mzko.promoters$category[data.mzko.promoters$mean.mean.oga_ko <= (data.mzko.promoters$mean.mean.wild_type - (data.mzko.promoters$mean.mean.wild_type * 0.25)) & data.mzko.promoters$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.mzko.promoters$category <- as.factor(data.mzko.promoters$category)
+
+data.mzko.promoters.log2 <- data.mzko.promoters[,c("id","mean.mean.quot.log2")]
+
+# For OGA's dataset
+
+data.promoters <- readxl::read_excel(path = "./data/210920_Diffmeth_Promoters_allruns_q30..xlsx",
+                           sheet = "diffMethTable_region_cmp1_promo", 
+                           range = "A1:AA50301", 
+                           col_names = TRUE,
+                           na = "NA", 
+                           trim_ws = TRUE, 
+                           col_types = c(rep("text",2),
+                                        rep("numeric",2),
+                                        rep("text",2),
+                                        rep("numeric",21)
+                                        )
+                           )
+
+
+# removing rows with Symbols = NA
+data.promoters.no.na <- drop_na(data = data.promoters)
+
+# Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
+data.promoters.no.na$category <- "unchanged"
+data.promoters.no.na$category[data.promoters.no.na$mean.mean.oga_ko >= (data.promoters.no.na$mean.mean.wild_type + (data.promoters.no.na$mean.mean.wild_type * 0.25)) & data.promoters.no.na$comb.P.val <= 0.05] <- "hyper" # Hypermethylated
+data.promoters.no.na$category[data.promoters.no.na$mean.mean.oga_ko <= (data.promoters.no.na$mean.mean.wild_type - (data.promoters.no.na$mean.mean.wild_type * 0.25)) & data.promoters.no.na$comb.P.val <= 0.05] <- "hypo" # Hypomethylated
+data.promoters.no.na$category <- as.factor(data.promoters.no.na$category)
+
+# Select only those CpG islands that have the lowest (best) ranking score
+data.promoters.top_100 <-head(arrange(data.promoters, data.promoters$combinedRank.var), n=100)
+
+data.promoters.log2 <- data.promoters[,c("id","mean.mean.quot.log2")]
+data.promoters.top_100.log2 <- data.promoters.top_100[,c("id","mean.mean.quot.log2")]
+```
+
+# Merge data and data_zko log2FC
+```{r}
+all_promoter_ids.zko <- full_join(x = data.promoters.log2, y = data.zko.promoters.log2, "id")
+colnames(all_promoter_ids.zko) <- c("id","log2.OGA", "log2.zko")
+
+# remove promoters with NAs
+all_promoter_ids.zko.no.na <- drop_na(all_promoter_ids.zko)
+
+all_promoter_ids.mzko <- full_join(x = data.promoters.log2, y = data.mzko.promoters.log2, "id")
+colnames(all_promoter_ids.mzko) <- c("id","log2.OGA", "log2.mzko")
+
+# remove promoters with NAs
+all_promoter_ids.mzko.no.na <- drop_na(all_promoter_ids.mzko)
+
+# For top 100
+all_promoter_ids.top_100.zko <- full_join(x = data.promoters.top_100.log2, y = data.zko.promoters.log2, "id")
+colnames(all_promoter_ids.top_100.zko) <- c("id","log2.OGA", "log2.zko")
+
+# remove promoters with NAs
+all_promoter_ids.top_100.zko.no.na <- drop_na(all_promoter_ids.top_100.zko)
+
+all_promoter_ids.top_100.mzko <- full_join(x = data.promoters.top_100.log2, y = data.mzko.promoters.log2, "id")
+colnames(all_promoter_ids.top_100.mzko) <- c("id","log2.OGA", "log2.mzko")
+
+# remove promoters with NAs
+all_promoter_ids.top_100.mzko.no.na <- drop_na(all_promoter_ids.top_100.mzko)
+
+```
+
+# Plot Log2 OGA's vs zKO and mzKO datasets
+## All promoters
+```{r promoter plots}
+
+p.zko <- make_plot(x = all_promoter_ids.zko$log2.OGA, y = all_promoter_ids.zko$log2.zko, XLAB = "OGA's promoter quot.log2", YLAB = "zKO promoter quot.log2")
+p.zko
+ggsave2(filename = "./Plots/promoters_zKO_vs_OGA.pdf", plot = p.zko)
+
+p.mzko <- make_plot(all_promoter_ids.mzko$log2.OGA, all_promoter_ids.mzko$log2.mzko, XLAB = "OGA's promoter quot.log2", YLAB = "mzKO promoter quot.log2")
+p.mzko
+ggsave2(filename = "./Plots/promoters_mzKO_vs_OGA.pdf", plot = p.mzko)
+
+```
+
+## Top 100 promoters
+```{r}
+# For top 100
+p.zko.top_100 <- make_plot(x = all_promoter_ids.top_100.zko$log2.OGA, y = all_promoter_ids.top_100.zko$log2.zko, XLAB = "OGA's promoter quot.log2", YLAB = "zKO promoter quot.log2")
+p.zko.top_100
+ggsave2(filename = "./Plots/promoters_zKO_vs_OGA.top_100.pdf", plot = p.zko)
+
+p.mzko.top_100 <- make_plot(all_promoter_ids.top_100.mzko$log2.OGA, all_promoter_ids.top_100.mzko$log2.mzko, XLAB = "OGA's promoter quot.log2", YLAB = "mzKO promoter quot.log2")
+p.mzko.top_100
+ggsave2(filename = "./Plots/promoters_mzKO_vs_OGA.top_100.pdf", plot = p.mzko)
+```
+
+# Correlation analysis for promoters
+## All promoters
+```{r correlation promoters}
+dir.create(path = "./Docs", showWarnings = FALSE)
+
+fit.zko <- lm(all_promoter_ids.zko.no.na$log2.OGA ~ all_promoter_ids.zko.no.na$log2.zko)
+summary(fit.zko)
+stats.zko.df <- glance(fit.zko)
+write.table(x = stats.zko.df, file = "./Docs/lm_promoters_zKO_vs_OGA.txt", sep = "\t")
+
+fit.mzko <- lm(all_promoter_ids.mzko.no.na$log2.OGA ~ all_promoter_ids.mzko.no.na$log2.mzko)
+summary(fit.mzko)
+stats.mzko.df <- glance(fit.mzko)
+write.table(x = stats.mzko.df, file = "./Docs/lm_promoters_mzKO_vs_OGA.txt", sep = "\t")
+```
+
+## Top 100 ranked promoters
+```{r}
+# For top 100
+fit.zko.top_100 <- lm(all_promoter_ids.top_100.zko.no.na$log2.OGA ~ all_promoter_ids.top_100.zko.no.na$log2.zko)
+summary(fit.zko.top_100)
+stats.zko.top_100.df <- glance(fit.zko.top_100)
+write.table(x = stats.zko.top_100.df, file = "./Docs/lm_promoters_zKO_vs_OGA.top_100.txt", sep = "\t")
+
+fit.mzko.top_100 <- lm(all_promoter_ids.top_100.mzko.no.na$log2.OGA ~ all_promoter_ids.top_100.mzko.no.na$log2.mzko)
+summary(fit.mzko.top_100)
+stats.mzko.top_100.df <- glance(fit.mzko.top_100)
+write.table(x = stats.mzko.top_100.df, file = "./Docs/lm_promoters_mzKO_vs_OGA.top_100.txt", sep = "\t")
+
 ```

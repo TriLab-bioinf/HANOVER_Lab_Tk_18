@@ -2,3 +2,11 @@ data/
 .Rproj.user
 Plots/
 .DS_Store
+.Rhistory
+DM_results/
+Docs/
+NAR_data/
+rnb_options_mzKO_WT.xml
+step6_p_q30_ez_met_rnbanalysis_ls_210917_forHernan\[4\].r
+step6_p_q30_rnbeads_ez_met_ls_210917\[56\].sh
+

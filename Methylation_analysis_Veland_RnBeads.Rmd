@@ -1,0 +1,39 @@
+---
+title: "Methylation analysis of Veland's data with RnBeands package"
+output: html_notebook
+author: Hernan Lorenzi
+---
+# Load libraries
+```{r Load libraries}
+library(RnBeads) 
+library(RnBeads.mm10)
+```
+
+```{r Load data}
+dir.create(path = "./DM_results", showWarnings = FALSE)
+
+### The following is where the file location is
+data.dir <- file.path("./data/GSE116489_RAW")
+
+### The following command is where the report should go
+report.dir <- file.path(data.dir, "./DM_results")
+
+### the following is necessary for sample annotation
+sample.annotation <- file.path(data.dir, "Veland_annotation.csv")
+
+rnb.get.assemblies()
+
+data.source <- c(data.dir, sample.annotation)
+
+rnb.options(identifiers.column="sampleID")
+rnb.options(import.bed.style= "bismarkCov")
+rnb.options(assembly="mm10")
+
+rnb.options("differential.variability"=TRUE)
+rnb.options("differential.report.sites"=TRUE)
+rnb.options("differential.enrichment.go"=TRUE)
+
+rnb.run.analysis(dir.reports=report.dir, sample.sheet=sample.annotation, data.source=data.source, data.type="bs.bed.dir")
+
+
+```
