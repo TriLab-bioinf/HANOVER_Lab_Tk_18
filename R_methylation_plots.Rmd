@@ -81,16 +81,19 @@ add_flags <- function(my_data){
 # Adding column with classification based on methylation difference > 25%  and q-value <= 0.05
   my_data$category <- "unchanged"
   my_data$weight <- 10
-  my_data$category[my_data$mean.mean.oga_ko >= (my_data$mean.mean.wild_type + (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- "hyper" # Hypermethylated
-  my_data$weight[my_data$mean.mean.oga_ko >= (my_data$mean.mean.wild_type + (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- 5
-  my_data$category[my_data$mean.mean.oga_ko <= (my_data$mean.mean.wild_type - (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- "hypo" # Hypomethylated
-  my_data$weight[my_data$mean.mean.oga_ko <= (my_data$mean.mean.wild_type - (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- 5
+  my_data$category[my_data$mean.mean.oga_ko >= (my_data$mean.mean.wild_type + 0.25) & my_data$comb.p.val <= 0.05] <- "hyper" # Hypermethylated
+  #my_data$category[my_data$mean.mean.oga_ko >= (my_data$mean.mean.wild_type + (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- "hyper" # Hypermethylated
   
-  my_data$weight[my_data$category == "hyper" & my_data$id %in% imprinted.genes.true$id] <- 2
-  my_data$category[my_data$category == "hyper" & my_data$id %in% imprinted.genes.true$id] <- "imprinted"
+  my_data$category[my_data$mean.mean.oga_ko <= (my_data$mean.mean.wild_type - 0.25) & my_data$comb.p.val <= 0.05] <- "hypo" # Hypomethylated
+  #my_data$category[my_data$mean.mean.oga_ko <= (my_data$mean.mean.wild_type - (my_data$mean.mean.wild_type * 0.25)) & my_data$comb.p.val <= 0.05] <- "hypo" # Hypomethylated
+  my_data$weight[my_data$category != "unchanged"] <- 5
   
-  my_data$weight[my_data$category == "hypo" & my_data$id %in% imprinted.genes.true$id] <- 2
-  my_data$category[my_data$category == "hypo" & my_data$id %in% imprinted.genes.true$id] <- "imprinted"
+  
+  my_data$category[(my_data$category == "hyper" | my_data$category == "hypo" ) & my_data$id %in% imprinted.genes.true$id] <- "imprinted"
+  my_data$weight[my_data$category == "imprinted"] <- 2
+  
+  my_data$category[ my_data$category == "unchanged" & my_data$id %in% imprinted.genes.true$id] <- "imprinted unchanged"
+  my_data$weight[my_data$category == "imprinted unchanged"] <- 2
   
   my_data$category <- as.factor(my_data$category)
   
@@ -121,15 +124,15 @@ plot_oga_wt_correlation <- function(my_data, type = ""){
               aes( x = mean.mean.wild_type, 
                    y = mean.mean.oga_ko, 
                    color = category)) +
-              geom_point(alpha = 0.7, size = ifelse(my_data$category == "unchanged", 0.5,1)) + # size of plot symbols
+              geom_point(alpha = 1, size = ifelse(my_data$category == "unchanged", 0.5,1)) + # size of plot symbols
               theme_linedraw() + 
-              scale_color_manual(breaks = c("hyper", "hypo", "unchanged", "imprinted"),
-                                 values=c("blue", "chartreuse3", "lightgray","red"), 
+              scale_color_manual(breaks = c("hyper", "hypo", "unchanged", "imprinted", "imprinted unchanged"),
+                                 values=c("deepskyblue3", "chartreuse3", "lightgray","firebrick1", "darkgoldenrod1"), 
                                  name="",
                                  guide = guide_legend(override.aes = list(size = 2)) # size of legend symbols
                                  ) + 
               theme(panel.grid = element_blank(), 
-                    legend.position=c(.1, .91),
+                    legend.position=c(.18, .90),
                     legend.margin = margin(unit(x = c(0,0,0,0), units = 'cm')),
                     legend.box.just = "left",
                     legend.key.size = unit(0.5, "cm"),
@@ -137,7 +140,7 @@ plot_oga_wt_correlation <- function(my_data, type = ""){
                     legend.text = element_text(size = 12),
                     plot.margin = unit(x = c(2,2,2,2), units = 'cm')
                     ) +
-              coord_equal(expand=FALSE) +
+              coord_equal(expand=TRUE) +
               ylab("Percent methylation in OGA KO") +
               xlab("Percent methylation in WT") +
               xlim(0,1) + ylim(0,1) +
