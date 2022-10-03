@@ -1,0 +1,2 @@
+for i in wt1 wt2 wt3 wt4; do sbatch --time=24:00:00 --cpus-per-task=4 --mem=32g run_methyl_abs2rel_pos.sh ${i} WT; done
+for i in oga1 oga2 oga3 oga4; do sbatch --time=24:00:00 --cpus-per-task=4 --mem=32g run_methyl_abs2rel_pos.sh ${i} OGA; done
